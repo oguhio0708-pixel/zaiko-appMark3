@@ -6,14 +6,13 @@ import os
 # ==========================================
 # 1. データベース設定と操作関数 
 # ==========================================
-# ★★★ 前回成功したURIをここに貼り付けてください ★★★
+# ★★★ ご自身のSupabaseのURLをここに貼り付けてください ★★★
 DB_URI = os.environ.get("DATABASE_URL", "postgresql://postgres.pixsxswdcaoggusfgbhv:Hionatamawari%402379070897@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres")
 
 def get_conn():
     return psycopg2.connect(DB_URI)
 
 def init_db():
-    # クラウド側にデータは保存済みなので、ここではテーブルの確認だけ行います
     conn = get_conn()
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS inventory (item_name TEXT PRIMARY KEY, current_stock REAL, lot_size REAL DEFAULT 1.0)''')
@@ -87,7 +86,7 @@ def main(page: ft.Page):
     settings_tab_content = ft.Column(scroll="auto", expand=True)
     content_area = ft.Container(content=main_tab_content, expand=True, padding=10)
 
-    # 包材リスト（これらに合致するものは「包材」タブへ、それ以外は「食材」タブへ）
+    # 包材リスト
     packaging_list = [
         "ピザボックスS(箱)", "ピザボックスM(箱)", "ピザボックスL(箱)", "ピザボックスXL(箱)",
         "サイドボックスS(個)", "サイドボックスM(個)", "ピザ弁当(パック)", "サラダ容器(パック)",
@@ -108,6 +107,31 @@ def main(page: ft.Page):
         preset_names = list(presets_data.keys())
         item_names = list(inventory_data.keys())
 
+        # ==========================================
+        # ★ TXTファイルを読み込んで順番を固定する処理
+        # ==========================================
+        try:
+            try:
+                with open("item_list.txt", "r", encoding="utf-8") as f:
+                    txt_order = [line.strip() for line in f if line.strip()]
+            except UnicodeDecodeError:
+                with open("item_list.txt", "r", encoding="cp932") as f: # Windowsの文字化け対策
+                    txt_order = [line.strip() for line in f if line.strip()]
+            
+            ordered_items = []
+            for item in txt_order:
+                if item in item_names:
+                    ordered_items.append(item)
+            
+            # TXTファイルにない新商品があれば一番下に追加
+            for item in item_names:
+                if item not in ordered_items:
+                    ordered_items.append(item)
+                    
+            item_names = ordered_items
+        except Exception:
+            pass # ファイルが無いなどのエラー時はそのまま
+
         preset_dropdown = ft.Dropdown(
             label="発注基準のプリセット",
             options=[ft.dropdown.Option(key=k) for k in preset_names],
@@ -122,19 +146,13 @@ def main(page: ft.Page):
 
         # 品物リストの構築
         for item in item_names:
-            info = inventory_data.get(item, {"stock": 0.0, "lot_size": 1.0})
-            stock = info["stock"]
-            
-            # 0の場合は空欄にして、タップ時の手間をなくす
-            display_stock = "" if stock == 0 else (str(int(stock)) if stock.is_integer() else str(stock))
-            
             inp = ft.TextField(
-                value=display_stock, 
+                value="", # ★過去の数字を無視して常に空欄（まっさら）にする
                 hint_text="0",
                 keyboard_type=ft.KeyboardType.NUMBER, 
                 width=100, 
                 text_align="right",
-                content_padding=10 # スマホで押しやすくする
+                content_padding=10
             )
             inventory_inputs[item] = inp
             all_text_fields.append(inp)
@@ -154,16 +172,16 @@ def main(page: ft.Page):
                 def on_submit(e):
                     next_idx = index + 1
                     if next_idx < len(all_text_fields):
-                        # 食材の最後まできたら、包材タブに自動で切り替える
                         if next_idx == num_food:
                             tabs.selected_index = 1
                             page.update()
                         all_text_fields[next_idx].focus()
                     else:
-                        page.focus() # 最後の項目ならキーボードを閉じる
+                        page.focus()
                 return on_submit
             all_text_fields[i].on_submit = make_submit(i)
 
+        # タブの構築 (Flet 0.22.1 安定版仕様)
         tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
@@ -173,9 +191,18 @@ def main(page: ft.Page):
             ],
             expand=True,
         )
+
         result_view = ft.Column()
 
+        # ==========================================
+        # ★ 計算ボタンの処理（タイムラグ対策＆自動リセット）
+        # ==========================================
         def calculate(e):
+            # 押された瞬間に「計算中」にして連打を防ぐ
+            e.control.content.value = "計算中..."
+            e.control.disabled = True
+            page.update()
+
             result_view.controls.clear()
             selected_p = preset_dropdown.value
             req_data = presets_data.get(selected_p, {})
@@ -202,11 +229,14 @@ def main(page: ft.Page):
                         
                     result_view.controls.append(ft.Text(value=line_text, color="red600", size=16))
                     order_text_lines.append(line_text)
+                
+                # ★ 計算が終わった品物の入力欄を自動リセットして空欄に戻す
+                inventory_inputs[item].value = ""
             
             if len(order_text_lines) == 1:
                 result_view.controls.append(ft.Text(value="すべて在庫が足りています！発注不要です。", color="green600", size=16))
 
-            def copy_to_clipboard(e):
+            def copy_to_clipboard(copy_e):
                 page.set_clipboard("\n".join(order_text_lines))
                 page.snack_bar = ft.SnackBar(content=ft.Text("発注リストをコピーしました！LINE等に貼り付けできます。"))
                 page.snack_bar.open = True
@@ -219,6 +249,10 @@ def main(page: ft.Page):
             
             page.snack_bar = ft.SnackBar(content=ft.Text("保存して計算しました"))
             page.snack_bar.open = True
+
+            # 計算が終わったらボタンを元の状態に戻す
+            e.control.content.value = "保存して計算"
+            e.control.disabled = False
             page.update()
 
         main_tab_content.controls.extend([
@@ -285,12 +319,13 @@ def main(page: ft.Page):
             content_area.content = settings_tab_content
         page.update()
 
+    # Flet 0.22.1 仕様のメニューバー
     page.navigation_bar = ft.NavigationBar(
         selected_index=0,
         destinations=[
-        ft.NavigationDestination(icon="list", label="発注・在庫"),
-        ft.NavigationDestination(icon="settings", label="設定"),
-    ],
+            ft.NavigationDestination(icon="list", label="発注・在庫"),
+            ft.NavigationDestination(icon="settings", label="設定"),
+        ],
         on_change=switch_tab
     )
     
@@ -299,4 +334,5 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
+    # Flet 0.22.1 仕様の起動コマンド
     ft.app(target=main, view=ft.AppView.WEB_BROWSER, host="0.0.0.0", port=port)
