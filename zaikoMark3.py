@@ -288,9 +288,9 @@ def main(page: ft.Page):
     page.navigation_bar = ft.NavigationBar(
         selected_index=0,
         destinations=[
-            ft.NavigationBarDestination(icon="list", label="発注・在庫"),
-            ft.NavigationBarDestination(icon="settings", label="設定"),
-        ],
+        ft.NavigationDestination(icon="list", label="発注・在庫"),
+        ft.NavigationDestination(icon="settings", label="設定"),
+    ],
         on_change=switch_tab
     )
     
