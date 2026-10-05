@@ -165,15 +165,15 @@ def main(page: ft.Page):
             all_text_fields[i].on_submit = make_submit(i)
 
         # タブの構築
-        tabs = ft.Tabs(
-            selected_index=0,
-            animation_duration=300,
-            tabs=[
-                ft.Tab(tab_content=ft.Text("食材", size=16, weight="bold"), content=ft.ListView(controls=food_controls, expand=True, spacing=10, padding=10)),
-                ft.Tab(tab_content=ft.Text("包材", size=16, weight="bold"), content=ft.ListView(controls=packaging_controls, expand=True, spacing=10, padding=10)),
-            ],
-            expand=True,
-        )
+     tabs = ft.Tabs(
+         selected_index=0,
+         animation_duration=300,
+         tabs=[
+             ft.Tab(text="食材", content=ft.ListView(controls=food_controls, expand=True, spacing=10, padding=10)),
+             ft.Tab(text="包材", content=ft.ListView(controls=packaging_controls, expand=True, spacing=10, padding=10)),
+         ],
+         expand=True,
+     )
         result_view = ft.Column()
 
         def calculate(e):
