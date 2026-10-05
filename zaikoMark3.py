@@ -164,7 +164,6 @@ def main(page: ft.Page):
                 return on_submit
             all_text_fields[i].on_submit = make_submit(i)
 
-        # タブの構築
         tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
