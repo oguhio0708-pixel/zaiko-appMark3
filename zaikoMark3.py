@@ -107,15 +107,13 @@ def main(page: ft.Page):
         preset_names = list(presets_data.keys())
         item_names = list(inventory_data.keys())
 
-        # ==========================================
-        # ★ TXTファイルを読み込んで順番を固定する処理
-        # ==========================================
+        # TXTファイルを読み込んで順番を固定する処理
         try:
             try:
                 with open("item_list.txt", "r", encoding="utf-8") as f:
                     txt_order = [line.strip() for line in f if line.strip()]
             except UnicodeDecodeError:
-                with open("item_list.txt", "r", encoding="cp932") as f: # Windowsの文字化け対策
+                with open("item_list.txt", "r", encoding="cp932") as f:
                     txt_order = [line.strip() for line in f if line.strip()]
             
             ordered_items = []
@@ -123,14 +121,13 @@ def main(page: ft.Page):
                 if item in item_names:
                     ordered_items.append(item)
             
-            # TXTファイルにない新商品があれば一番下に追加
             for item in item_names:
                 if item not in ordered_items:
                     ordered_items.append(item)
                     
             item_names = ordered_items
         except Exception:
-            pass # ファイルが無いなどのエラー時はそのまま
+            pass 
 
         preset_dropdown = ft.Dropdown(
             label="発注基準のプリセット",
@@ -147,7 +144,7 @@ def main(page: ft.Page):
         # 品物リストの構築
         for item in item_names:
             inp = ft.TextField(
-                value="", # ★過去の数字を無視して常に空欄（まっさら）にする
+                value="", # 常に空欄（まっさら）にする
                 hint_text="0",
                 keyboard_type=ft.KeyboardType.NUMBER, 
                 width=100, 
@@ -164,24 +161,14 @@ def main(page: ft.Page):
             else:
                 food_controls.append(row)
 
-        num_food = len(food_controls)
+        # ★変更点：エンターキーを押したら「キーボードを閉じるだけ」にする
+        def on_submit_close_keyboard(e):
+            page.focus()
+            
+        for inp in all_text_fields:
+            inp.on_submit = on_submit_close_keyboard
 
-        # エンターキーで次の入力欄へ移動する処理
-        for i in range(len(all_text_fields)):
-            def make_submit(index):
-                def on_submit(e):
-                    next_idx = index + 1
-                    if next_idx < len(all_text_fields):
-                        if next_idx == num_food:
-                            tabs.selected_index = 1
-                            page.update()
-                        all_text_fields[next_idx].focus()
-                    else:
-                        page.focus()
-                return on_submit
-            all_text_fields[i].on_submit = make_submit(i)
-
-        # タブの構築 (Flet 0.22.1 安定版仕様)
+        # タブの構築
         tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
@@ -192,33 +179,28 @@ def main(page: ft.Page):
             expand=True,
         )
 
-        result_view = ft.Column()
-
-        # ==========================================
-        # ★ 計算ボタンの処理（タイムラグ対策＆自動リセット）
-        # ==========================================
+        # ★変更点：計算結果をポップアップ（ダイアログ）で表示する処理
         def calculate(e):
-            # 押された瞬間に「計算中」にして連打を防ぐ
             e.control.content.value = "計算中..."
             e.control.disabled = True
             page.update()
 
-            result_view.controls.clear()
             selected_p = preset_dropdown.value
             req_data = presets_data.get(selected_p, {})
-            
             order_text_lines = [f"【発注リスト: {selected_p}】"]
+            
+            # ポップアップの中に表示するリスト（スクロール可能）
+            dialog_list = ft.ListView(expand=True, spacing=5)
 
             for item in item_names:
                 val = inventory_inputs[item].value
-                stock = float(val) if val else 0.0 # 空欄の場合は0として計算
+                stock = float(val) if val else 0.0 # 空欄の場合は0
                 save_inventory(item, stock)
                 
                 req_stock = req_data.get(item, 0.0)
                 lot_size = inventory_data[item]["lot_size"]
                 deficit = req_stock - stock
                 
-                # 不要なものは非表示にし、必要なものだけをリスト化する
                 if deficit > 0:
                     if lot_size > 1.0:
                         order_units = math.ceil(deficit / lot_size)
@@ -227,14 +209,14 @@ def main(page: ft.Page):
                         order_amount = int(deficit) if deficit.is_integer() else round(deficit, 1)
                         line_text = f"・{item}: {order_amount} 発注"
                         
-                    result_view.controls.append(ft.Text(value=line_text, color="red600", size=16))
+                    dialog_list.controls.append(ft.Text(value=line_text, color="red600", size=16))
                     order_text_lines.append(line_text)
                 
-                # ★ 計算が終わった品物の入力欄を自動リセットして空欄に戻す
+                # 計算が終わった品物は空欄にリセット
                 inventory_inputs[item].value = ""
             
             if len(order_text_lines) == 1:
-                result_view.controls.append(ft.Text(value="すべて在庫が足りています！発注不要です。", color="green600", size=16))
+                dialog_list.controls.append(ft.Text(value="すべて在庫が足りています！発注不要です。", color="green600", size=16))
 
             def copy_to_clipboard(copy_e):
                 page.set_clipboard("\n".join(order_text_lines))
@@ -242,24 +224,46 @@ def main(page: ft.Page):
                 page.snack_bar.open = True
                 page.update()
 
-            if len(order_text_lines) > 1:
-                result_view.controls.append(
-                    ft.FilledButton(content=ft.Text("リストをコピーする", size=16), on_click=copy_to_clipboard, icon="copy")
-                )
-            
-            page.snack_bar = ft.SnackBar(content=ft.Text("保存して計算しました"))
-            page.snack_bar.open = True
+            def close_dialog(close_e):
+                page.dialog.open = False
+                page.update()
 
-            # 計算が終わったらボタンを元の状態に戻す
-            e.control.content.value = "保存して計算"
+            # ポップアップの下部に配置するボタン
+            actions = []
+            if len(order_text_lines) > 1:
+                actions.append(ft.FilledButton("コピーする", on_click=copy_to_clipboard, icon="copy"))
+            actions.append(ft.TextButton("閉じる", on_click=close_dialog))
+
+            # ポップアップ本体の作成
+            dlg = ft.AlertDialog(
+                title=ft.Text("発注リスト", weight="bold"),
+                content=ft.Container(content=dialog_list, width=320, height=400),
+                actions=actions,
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            
+            page.dialog = dlg
+            dlg.open = True
+
+            # 計算ボタンを元の状態に戻す
+            e.control.content.value = "計算する"
             e.control.disabled = False
             page.update()
 
+        # 画面をまっさらにリセットする機能
+        def clear_screen(e):
+            for item in item_names:
+                inventory_inputs[item].value = ""
+            page.update()
+
+        # 結果画面を下に置くのをやめ、タブが画面を広く使えるように変更
         main_tab_content.controls.extend([
-            ft.Row([preset_dropdown, ft.FilledButton(content=ft.Text("保存して計算"), on_click=calculate)]),
-            tabs,
-            ft.Divider(), 
-            result_view
+            ft.Row([
+                preset_dropdown, 
+                ft.FilledButton(content=ft.Text("計算する"), on_click=calculate),
+                ft.OutlinedButton(text="クリア", on_click=clear_screen, icon="refresh")
+            ]),
+            tabs
         ])
 
         # ====================
@@ -319,7 +323,6 @@ def main(page: ft.Page):
             content_area.content = settings_tab_content
         page.update()
 
-    # Flet 0.22.1 仕様のメニューバー
     page.navigation_bar = ft.NavigationBar(
         selected_index=0,
         destinations=[
@@ -334,5 +337,4 @@ def main(page: ft.Page):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    # Flet 0.22.1 仕様の起動コマンド
     ft.app(target=main, view=ft.AppView.WEB_BROWSER, host="0.0.0.0", port=port)
