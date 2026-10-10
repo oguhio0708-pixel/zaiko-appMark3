@@ -250,21 +250,47 @@ def main(page: ft.Page):
             e.control.disabled = False
             page.update()
 
-        # 画面をまっさらにリセットする機能
+        # ーーー【追加】途中保存・復元・クリア機能 ーーー
+        def save_temp(e):
+            for item in item_names:
+                val = inventory_inputs[item].value
+                stock = float(val) if val else 0.0
+                save_inventory(item, stock)
+            page.snack_bar = ft.SnackBar(content=ft.Text("入力途中のデータを保存しました！"))
+            page.snack_bar.open = True
+            page.update()
+
+        def load_temp(e):
+            db_data = get_items()
+            for item in item_names:
+                stock = db_data.get(item, {}).get("stock", 0.0)
+                if stock > 0:
+                    inventory_inputs[item].value = str(int(stock)) if stock.is_integer() else str(stock)
+                else:
+                    inventory_inputs[item].value = ""
+            page.snack_bar = ft.SnackBar(content=ft.Text("保存されたデータを復元しました"))
+            page.snack_bar.open = True
+            page.update()
+
         def clear_screen(e):
             for item in item_names:
                 inventory_inputs[item].value = ""
             page.update()
 
-        # 結果画面を下に置くのをやめ、タブが画面を広く使えるように変更
+        # スマホで押しやすいように「計算ボタン」と「保存・復元・クリア」を2段に分ける
         main_tab_content.controls.extend([
             ft.Row([
                 preset_dropdown, 
-                ft.FilledButton(content=ft.Text("計算する"), on_click=calculate),
-                ft.OutlinedButton(text="クリア", on_click=clear_screen, icon="refresh")
+                ft.FilledButton(content=ft.Text("計算する"), on_click=calculate, expand=True)
+            ]),
+            ft.Row([
+                ft.OutlinedButton(text="途中保存", on_click=save_temp, icon="save", expand=True),
+                ft.OutlinedButton(text="復元", on_click=load_temp, icon="restore", expand=True),
+                ft.OutlinedButton(text="クリア", on_click=clear_screen, icon="refresh", expand=True)
             ]),
             tabs
         ])
+        # ーーーーーーーーーーーーーーーーーーーーーーーー
 
         # ====================
         # ② 設定画面
